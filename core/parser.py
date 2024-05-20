@@ -1,7 +1,3 @@
-import sys
-
-sys.path.append("..")
-
 from burp import IBurpExtenderCallbacks
 from collections import defaultdict, namedtuple
 
@@ -9,8 +5,37 @@ from collections import defaultdict, namedtuple
 class Parser:
     def __init__(self, helpers, callbacks):
         """Defines internal config"""
+        # type: (IExtensionHelpers, IBurpExtenderCallbacks, function) -> None
         self._helpers = helpers
         self._callbacks = callbacks
+
+    def parseBodyWwwFormUrlEncoded(self, body):
+        # type: (str) -> Dict[str, str]
+        """
+        Parses a body with content-type application/x-www-form-urlencoded into
+        a dict mapping names to values
+        """
+        return dict()
+
+    def parseBodyApplicationJson(self, body):
+        # type: (str) -> Dict[str, str]
+        """
+        Parses a body with content-type application/x-www-form-urlencoded into
+        a dict mapping names to values
+        """
+        return dict()
+
+    def parseContentType(self, headers):
+        # type: (List[str]) -> Optional[str]
+        """From a list of headers, returns the content-type, if existent"""
+        contentType = None
+        for header in headers:
+            if header.lower().startswith("content-type"):
+                try:
+                    return header.lower().split(":")[1].strip()
+                except IndexError:  # malformed header without a value
+                    continue
+        return contentType
 
     def parseCookies(self, rawCookieArr):
         # type: (List[ICookie]) -> Dict[str, Set[str]]
@@ -31,14 +56,14 @@ class Parser:
     def parseRequestMessageInfo(
         self, messageInfo, toolFlag=IBurpExtenderCallbacks.TOOL_PROXY
     ):
-        # type: (IHttpRequestResponse, int) -> Tuple[str, str, str, Dict[str, Set[str], List[str], str]
+        # type: (IHttpRequestResponse, int) -> Tuple[str, str, str, List[IParameter], List[str], str]
         """Parses a messageInfo object into multiple text fields"""
         requestInfo = self._helpers.analyzeRequest(messageInfo)
 
         source = self._callbacks.getToolName(toolFlag)
         method = requestInfo.getMethod()
         url = str(requestInfo.getUrl())  # getUrl returns a java.net.URL object
-        parameters = self.parseParameters(requestInfo.getParameters())
+        parameters = requestInfo.getParameters()
         headers = requestInfo.getHeaders()
         body = messageInfo.getRequest()[requestInfo.getBodyOffset() :]
         RequestData = namedtuple(

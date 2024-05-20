@@ -1,4 +1,13 @@
 from burp import IBurpExtenderCallbacks
+from burp.IParameter import (
+    PARAM_BODY,
+    PARAM_COOKIE,
+    PARAM_JSON,
+    PARAM_MULTIPART_ATTR,
+    PARAM_URL,
+    PARAM_XML,
+    PARAM_XML_ATTR,
+)
 from java.util import ArrayList
 from parser import Parser
 
@@ -12,15 +21,15 @@ class Fuzzer:
         self.parser = Parser(self._helpers, self._callbacks)
         self.newIssueHook = issueHook
 
-    def createRequestFromPost(self, headers, method="GET"):
-        # type: (java.util.ArrayList) -> byte[]
+    def createRequestFromPost(self, requestinfo, method="GET"):
+        # type: (Tuple[str, str, str, Dict[str, Set[str], List[str], str]) -> byte[]
         """
-        Receives headers from a POST request, removes POST-specific ones and changes
-        the method
+        Receives headers from a POST request, removes POST-specific ones, changes the
+        method and inserts parameters
         """
-        modifiedHeaders = ArrayList(headers)
-        modifiedRequestLine = method + modifiedHeaders.get(0)[4:]
-        modifiedHeaders.set(0, modifiedRequestLine)
+        modifiedHeaders = requestinfo.headers
+        modifiedRequestLine = method + modifiedHeaders[0][4:]
+        modifiedHeaders[0] = modifiedRequestLine
         postOnlyHeaders = ["Content-Type", "Content-Length"]
         modifiedHeaders = [
             header
@@ -29,6 +38,17 @@ class Fuzzer:
         ]
 
         emptyBodyRequest = self._helpers.buildHttpMessage(modifiedHeaders, "")
+
+        for parameter in requestinfo.parameters:
+            if parameter.getType() in [PARAM_COOKIE, PARAM_URL]:
+                continue
+            urlParameter = self._helpers.buildParameter(
+                parameter.getName(), parameter.getValue(), PARAM_URL
+            )
+            emptyBodyRequest = self._helpers.addParameter(
+                emptyBodyRequest, urlParameter
+            )
+
         return emptyBodyRequest
 
     def fuzzRequestMethod(
@@ -42,7 +62,10 @@ class Fuzzer:
         requestInfo = self.parser.parseRequestMessageInfo(messageInfo, toolFlag)
 
         if requestInfo.method == "POST":
-            newRequest = self.createRequestFromPost(requestInfo.headers)
+            #newRequest = self.createRequestFromPost(requestInfo) # quebra com formdata
+            #newRequest = self._helpers.toggleRequestMethod(messageInfo.getRequest()) # quebra com json
+            if not newRequest:
+                return
             modifiedRequestResponse = self._callbacks.makeHttpRequest(
                 messageInfo.getHttpService(), newRequest
             )
