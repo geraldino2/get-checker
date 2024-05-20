@@ -3,24 +3,28 @@ from burp import IHttpListener
 from burp import IProxyListener
 from burp import IExtensionStateListener
 from burp import IBurpExtenderCallbacks
+from burp import IMessageEditorController
 from burp import ITab
-from core.piiscanner import PIIScanner
-from collections import defaultdict
 from java.io import PrintWriter
-from javax.swing import JPanel, JLabel, JList, JScrollPane, BoxLayout
+from javax.swing import JList, JScrollPane, BoxLayout, JTabbedPane, JSplitPane
+from java.util import ArrayList
+from threading import Lock
+from ui.table import Table, TableModel
+from core.fuzzer import Fuzzer
+from ui.logentry import LogEntry
 
-CONSUMER = PIIScanner()
-
-class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IExtensionStateListener, ITab):
+class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IExtensionStateListener, ITab, IMessageEditorController, TableModel):
     def __init__(self):
         # type: () -> None
         """Defines config"""
-        self.consumer = CONSUMER
+        self.EXT_NAME = "GET Checker"
+        self._log = ArrayList()
+        self._lock = Lock()
 
     def defineMetadata(self):
         # type: () -> None
         """Defines metadata used by Burp (extension name)"""
-        self._callbacks.setExtensionName(self.consumer.EXT_NAME)
+        self._callbacks.setExtensionName(self.EXT_NAME)
 
     def registerListeners(self):
         # type: () -> None
@@ -45,124 +49,107 @@ class BurpExtender(IBurpExtender, IHttpListener, IProxyListener, IExtensionState
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
         self._stdout = PrintWriter(callbacks.getStdout(), True)
-        
+        self.fuzzer = Fuzzer(
+            callbacks = self._callbacks,
+            helpers = self._helpers,
+            issueHook = self.createIssue
+        )
         self.registerListeners()
 
         self.defineMetadata()
 
         self.defineUI()
     
+    def createIssue(self, url, originalMessageInfo, modifiedMessageInfo, toolFlag, verb = "GET"):
+        # type: (Tuple[str, str]) -> None
+        """Creates a log entry in the UI"""
+        self._lock.acquire()
+        row = self._log.size()
+        self._log.add(LogEntry(toolFlag, self._callbacks.saveBuffersToTempFiles(originalMessageInfo), self._callbacks.saveBuffersToTempFiles(modifiedMessageInfo), url))
+        self.fireTableRowsInserted(row, row)
+        self._lock.release()
+
+    #
+    # implement IMessageEditorController
+    # this allows our request/response viewers to obtain details about the messages being displayed
+    #
+    
+    def getHttpService(self):
+        return self._currentlyDisplayedItem.getHttpService()
+
+    def getRequest(self):
+        return self._currentlyDisplayedItem.getRequest()
+
+    def getResponse(self):
+        return self._currentlyDisplayedItem.getResponse()
+
     def defineUI(self):
         # type: () -> None
         """
         Defines the UI for the extension tab. UI consists basically of a 
-        JList containing items from the consumer variable _issues.
+        JList containing items from the variable _issues.
         """
-        self._main_panel = JPanel()
-        self._main_panel.setLayout(
-            BoxLayout(self._main_panel, BoxLayout.Y_AXIS)
-        )
-        self._main_panel.add(JLabel("Issue list"))
-        self._scroll_pane = JScrollPane(JList(self.consumer._issues))
-        self._main_panel.add(self._scroll_pane)
+        # main split pane
+        self._main_panel = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+        
+        # table of log entries
+        logTable = Table(self)
+        scrollPane = JScrollPane(logTable)
+        self._main_panel.setLeftComponent(scrollPane)
+
+        # tabs with request/response viewers
+        tabs = JTabbedPane()
+        self._requestViewer = self._callbacks.createMessageEditor(self, False)
+        self._responseViewer = self._callbacks.createMessageEditor(self, False)
+        self._modifiedRequestViewer = self._callbacks.createMessageEditor(self, False)
+        self._modifiedResponseViewer = self._callbacks.createMessageEditor(self, False)
+        tabs.addTab("Request", self._requestViewer.getComponent())
+        tabs.addTab("Response", self._responseViewer.getComponent())
+        tabs.addTab("Modified request", self._modifiedRequestViewer.getComponent())
+        tabs.addTab("Modified response", self._modifiedResponseViewer.getComponent())
+        self._main_panel.setRightComponent(tabs)
+        
+        # customize our UI components
+        self._callbacks.customizeUiComponent(self._main_panel)
+        self._callbacks.customizeUiComponent(logTable)
+        self._callbacks.customizeUiComponent(scrollPane)
+        self._callbacks.customizeUiComponent(tabs)
 
         self._callbacks.addSuiteTab(self)
 
     def getTabCaption(self):
         # type: () -> str
         """Defined in ITab. Defines tab caption."""
-        return self.consumer.EXT_NAME
+        return self.EXT_NAME
 
     def getUiComponent(self):
         # type: () -> java.awt.Component
         """Defined in ITab. Defines the main UI component for the tab."""
         return self._main_panel
 
-    def parseCookies(self, rawCookieArr):
-        # type: (List[ICookie]) -> Dict[str, Set[str]]
-        """Converts an array of cookies into a dict mapping names to values"""
-        cookies = defaultdict(set)
-        for rawCookie in rawCookieArr:
-            cookies[rawCookie.getName()].add(rawCookie.getValue())
-        return dict(cookies)
-    
-    def parseParameters(self, rawParametersArr):
-        # type: (List[IParameter]) -> Dict[str, Set[str]]
-        """Converts an array of params into a dict mapping names to values"""
-        params = defaultdict(set)
-        for rawParameter in rawParametersArr:
-            params[rawParameter.getName()].add(rawParameter.getValue())
-        return dict(params)
-
-    def parseRequestMessageInfo(self, messageInfo, toolFlag = IBurpExtenderCallbacks.TOOL_PROXY):
-        # type: (IHttpRequestResponse, int) -> Tuple[str, str, str, Dict[str, Set[str]]]
-        """Parses a messageInfo object into multiple text fields"""
-        requestInfo = self._helpers.analyzeRequest(messageInfo)
-
-        source = self._callbacks.getToolName(toolFlag)
-        method = requestInfo.getMethod()
-        url = str(requestInfo.getUrl()) # getUrl returns a java.net.URL object
-        parameters = self.parseParameters(requestInfo.getParameters())
-        return source, method, url, parameters
-
-    def parseResponseMessageInfo(self, messageInfo, toolFlag = IBurpExtenderCallbacks.TOOL_PROXY):
-        # type: (IHttpRequestResponse, int) -> Tuple[str, str, str, int, str, Dict[str, Set[str]], List[str]]
-        """Parses a messageInfo object into multiple text fields"""
-        httpResponse = messageInfo.getResponse()
-        parsedResponse = self._helpers.analyzeResponse(httpResponse)
-        
-        requestInfo = self.parseRequestMessageInfo(messageInfo)
-        _, method, url, _ = requestInfo
-
-        source = self._callbacks.getToolName(toolFlag)
-        status = parsedResponse.getStatusCode()
-        bodyOffset = parsedResponse.getBodyOffset()
-        body = self._helpers.bytesToString(httpResponse[bodyOffset:])
-        cookies = self.parseCookies(parsedResponse.getCookies())
-        headers = parsedResponse.getHeaders()
-        return source, method, url, status, body, cookies, headers
-
     def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
         # type: (int, boolean, IHttpRequestResponse) -> None
         """
         Defined in IHttpListener, invoked with HTTP traffic outside proxy.
-        Process traffic from general HTTP listener, parses the message if it is 
-        a response and forwards it to a consumer. 
+        Process traffic from general HTTP listener, parses the message and if
+        it is a request, fuzz the request verb. 
         """
         if messageIsRequest:
-            self.consumer.treatRequest(
-                *self.parseRequestMessageInfo(
-                    messageInfo,
-                    toolFlag
-                )
-            )
+            pass
         else:
-            self.consumer.treatResponse(
-                *self.parseResponseMessageInfo(
-                    messageInfo,
-                    toolFlag
-                )
-            )
+            self.fuzzer.fuzzRequestVerb(messageInfo, toolFlag)
 
     def processProxyMessage(self, messageIsRequest, message):
         # type: (boolean, IInterceptedProxyMessage) -> None
         """
         Defined in IProxyListener, invoked with proxy traffic.
-        Process traffic from proxy, parses the message if it is a response
-        and forwards it to a consumer. 
+        Process traffic from proxy, parses the message and if it is a request,
+        fuzz the request verb.
         """
         if messageIsRequest:
-            self.consumer.treatRequest(
-                *self.parseRequestMessageInfo(
-                    messageInfo,
-                    toolFlag
-                )
-            )
+            pass
         else:
-            messageInfo = message.getMessageInfo()
-            self.consumer.treatResponse(
-                *self.parseResponseMessageInfo(messageInfo)
-            )
+            self.fuzzer.fuzzRequestVerb(message.getMessageInfo())
 
     def extensionUnloaded(self):
         # type: () -> None
