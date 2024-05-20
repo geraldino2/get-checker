@@ -1,5 +1,6 @@
 import unicodedata
 
+
 def normalizeString(text):
     # type: (str) -> str
     """Receives a raw string, normalizes unicoded chars and returns ascii"""

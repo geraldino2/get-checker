@@ -1,2 +1,3 @@
 ## TODO
 - Unit tests
+- Logging
