@@ -22,7 +22,7 @@ class Fuzzer:
         self.newIssueHook = issueHook
 
     def createRequestFromPost(self, requestinfo, method="GET"):
-        # type: (Tuple[str, str, str, Dict[str, Set[str], List[str], str]) -> byte[]
+        # type: (byte[], str) -> byte[]
         """
         Receives headers from a POST request, removes POST-specific ones, changes the
         method and inserts parameters
@@ -61,9 +61,24 @@ class Fuzzer:
         """
         requestInfo = self.parser.parseRequestMessageInfo(messageInfo, toolFlag)
 
+        contentType = self.parser.parseContentType(requestInfo.headers)
+        if not contentType:
+            return
+
+        if contentType == "application/json":
+            for char in ["{", "}", "[", "]"]:
+                if requestInfo.body.count(char) > 1:
+                    return
+
         if requestInfo.method == "POST":
-            #newRequest = self.createRequestFromPost(requestInfo) # quebra com formdata
-            #newRequest = self._helpers.toggleRequestMethod(messageInfo.getRequest()) # quebra com json
+            if contentType == "application/json":
+                newRequest = self.createRequestFromPost(
+                    requestInfo
+                )  # doesn't support formdata
+            else:
+                newRequest = self._helpers.toggleRequestMethod(
+                    messageInfo.getRequest()
+                )  # doesn't support json
             if not newRequest:
                 return
             modifiedRequestResponse = self._callbacks.makeHttpRequest(

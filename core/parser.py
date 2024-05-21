@@ -32,7 +32,7 @@ class Parser:
         for header in headers:
             if header.lower().startswith("content-type"):
                 try:
-                    return header.lower().split(":")[1].strip()
+                    return header.lower().split(":")[1].split(";")[0].strip()
                 except IndexError:  # malformed header without a value
                     continue
         return contentType
