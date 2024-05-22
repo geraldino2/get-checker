@@ -14,7 +14,7 @@ The defined code structure is pretty simple. `main.py` implements `BurpExtender`
 
 The UI is defined in ui, managing the table and log entries. `fuzzer.py` defines `Fuzzer`, who is responsible to parse requests using auxiliary modules (`parser.py`, `textutils.py`). POST requests are then converted to GET, using the `Parser` and Burp's `IExtensionHelpers`, and sent again. In case of success, a new `LogEntry` is placed into the table.
 
-![image](https://github.com/geraldino2/get-checker/assets/70358808/4d3d39f8-9898-4c8f-a8f5-3a31de146596)
+![image](codestructure.png)
 
 
 Additional documentation is available [here](docs.md).
