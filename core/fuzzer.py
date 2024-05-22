@@ -40,7 +40,10 @@ class Fuzzer:
         emptyBodyRequest = self._helpers.buildHttpMessage(modifiedHeaders, "")
 
         for parameter in requestinfo.parameters:
-            if parameter.getType() in [PARAM_COOKIE, PARAM_URL]:
+            if parameter.getType() in [
+                PARAM_COOKIE,
+                PARAM_URL,
+            ]:  # ignore GET parameters
                 continue
             urlParameter = self._helpers.buildParameter(
                 parameter.getName(), parameter.getValue(), PARAM_URL
@@ -62,32 +65,37 @@ class Fuzzer:
         requestInfo = self.parser.parseRequestMessageInfo(messageInfo, toolFlag)
 
         contentType = self.parser.parseContentType(requestInfo.headers)
-        if not contentType:
+        if not contentType:  # content type might be undefined
             return
 
         if contentType == "application/json":
             for char in ["{", "}", "[", "]"]:
-                if requestInfo.body.count(char) > 1:
+                if (
+                    requestInfo.body.count(char) > 1
+                ):  # arrays/objects inside json can't be converted to GET
                     return
 
         if requestInfo.method == "POST":
             if contentType == "application/json":
                 newRequest = self.createRequestFromPost(
                     requestInfo
-                )  # doesn't support formdata
+                )  # createRequestFromPost doesn't support formdata
             else:
                 newRequest = self._helpers.toggleRequestMethod(
                     messageInfo.getRequest()
-                )  # doesn't support json
+                )  # toggleRequestMethod doesn't support json
             if not newRequest:
-                return
+                return  # ensure that the request is possible
             modifiedRequestResponse = self._callbacks.makeHttpRequest(
                 messageInfo.getHttpService(), newRequest
             )
             parsedModifiedResponse = self.parser.parseResponseMessageInfo(
                 modifiedRequestResponse
             )
-            if parsedModifiedResponse.status == 200:
+            if (
+                parsedModifiedResponse.status >= 200
+                and parsedModifiedResponse.status < 300
+            ):
                 self.newIssueHook(
                     url=parsedModifiedResponse.url,
                     originalMessageInfo=messageInfo,
