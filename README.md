@@ -9,7 +9,9 @@ Check [usage/README.md](usage/README.md) for usage instructions.
 - [This URL](http://i.geraldino2.com/dr?status=200&body=ok) should reply every request with a 200. Feel free to use it during tests.
 
 ## Structure
-TODO
+The defined code structure is pretty simple. `main.py` implements `BurpExtender`, deals with all that is needed to setup the extension, sets up the UI and creates a Fuzzer.
+
+The UI is defined in ui, managing the table and log entries. `fuzzer.py` defines `Fuzzer`, who is responsible to parse requests using auxiliary modules (`parser.py`, `textutils.py`). POST requests are then converted to GET, using the `Parser` and Burp's `IExtensionHelpers`, and sent again. In case of success, a new `LogEntry` is placed into the table.
 
 Additional documentation is available [here](docs.md).
 
