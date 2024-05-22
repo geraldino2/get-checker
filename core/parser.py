@@ -9,22 +9,6 @@ class Parser:
         self._helpers = helpers
         self._callbacks = callbacks
 
-    def parseBodyWwwFormUrlEncoded(self, body):
-        # type: (str) -> Dict[str, str]
-        """
-        Parses a body with content-type application/x-www-form-urlencoded into
-        a dict mapping names to values
-        """
-        return dict()
-
-    def parseBodyApplicationJson(self, body):
-        # type: (str) -> Dict[str, str]
-        """
-        Parses a body with content-type application/x-www-form-urlencoded into
-        a dict mapping names to values
-        """
-        return dict()
-
     def parseContentType(self, headers):
         # type: (List[str]) -> Optional[str]
         """From a list of headers, returns the content-type, if existent"""
