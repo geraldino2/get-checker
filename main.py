@@ -91,9 +91,7 @@ class BurpExtender(
         for messageInfo in selectedMessages:
             start_new_thread(self.scanner.scanRequest, (messageInfo,))
 
-    def createLogEntry(
-        self, url, originalMessageInfo, modifiedMessageInfo, paramName, method="GET"
-    ):
+    def createLogEntry(self, url, originalMessageInfo, modifiedMessageInfo, paramName):
         # type: (str, IHttpRequestResponse, IHttpRequestResponse, str, str) -> None
         """Creates a log entry in the UI"""
         with self._lock:

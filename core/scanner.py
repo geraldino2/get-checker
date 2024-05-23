@@ -2,14 +2,13 @@ from burp import IBurpExtenderCallbacks
 from burp.IParameter import (
     PARAM_BODY,
     PARAM_COOKIE,
-    PARAM_JSON,
-    PARAM_MULTIPART_ATTR,
     PARAM_URL,
-    PARAM_XML,
-    PARAM_XML_ATTR,
 )
-from java.util import ArrayList
 from parser import Parser
+from webdriverxss import getWebdriver, verifyXss
+
+
+XSS_PAYLOADS = ["<script>console.log('gdOLa9Iqwiy0pe2p')</script>", "foo", "bar"]
 
 
 class Scanner:
@@ -21,84 +20,78 @@ class Scanner:
         self.parser = Parser(self._helpers, self._callbacks)
         self.newIssueHook = issueHook
 
-    def createRequestFromPost(self, requestinfo, method="GET"):
-        # type: (byte[], str) -> byte[]
+    def updateRequestWithParam(self, request, parameter):
+        # type: (byte[], IParameter) -> byte[]
         """
-        Receives headers from a POST request, removes POST-specific ones, changes the
-        method and inserts parameters
+        Receives a request and an existing parameter, updates the parameter value
         """
-        modifiedHeaders = requestinfo.headers
-        modifiedRequestLine = method + modifiedHeaders[0][4:]
-        modifiedHeaders[0] = modifiedRequestLine
-        postOnlyHeaders = ["Content-Type", "Content-Length"]
-        modifiedHeaders = [
-            header
-            for header in modifiedHeaders
-            if not any(header.startswith(h) for h in postOnlyHeaders)
-        ]
+        return self._helpers.updateParameter(request, parameter)
 
-        emptyBodyRequest = self._helpers.buildHttpMessage(modifiedHeaders, "")
+    def generateXssRequests(self, request, requestInfo):
+        # type: (byte[], Tuple[str, str, str, List[IParameter], List[str], str]) -> List[byte[]]
+        """
+        Receives a request and a tuple with request information, inserts XSS payloads
+        for each parameter and creates a modified request with the payload. Returns
+        len(payloads)*len(parameters) requests (one for each payload-parameter pair)
+        """
+        xssRequests = list()
+        for parameter in requestInfo.parameters:
+            if parameter.getType() == PARAM_URL:
+                for payload in XSS_PAYLOADS:
+                    modifiedParam = self._helpers.buildParameter(
+                        parameter.getName(), payload, parameter.getType()
+                    )
+                    xssRequests.append(
+                        self.updateRequestWithParam(request, modifiedParam)
+                    )
+        return xssRequests
 
-        for parameter in requestinfo.parameters:
-            if parameter.getType() in [
-                PARAM_COOKIE,
-                PARAM_URL,
-            ]:  # ignore GET parameters
-                continue
-            urlParameter = self._helpers.buildParameter(
-                parameter.getName(), parameter.getValue(), PARAM_URL
+    def probeXss(self, originalMessageInfo, request, webdriver):
+        # type: (IHttpRequestResponse, byte[], webdriver.Chrome) -> None
+        """
+        Sends a request with an XSS payload, using Burp and Selenium (for DOM XSS),
+        waits for the response and checks if the payload is executed. If it is, creates
+        an issue
+        """
+        requestInfo = self._helpers.analyzeRequest(
+            originalMessageInfo.getHttpService(), request
+        )
+        url = str(requestInfo.getUrl())  # getUrl returns a java.net.URL object
+
+        if verifyXss(webdriver, url):
+            messageInfo = self._callbacks.makeHttpRequest(
+                originalMessageInfo.getHttpService(), originalMessageInfo.getRequest()
             )
-            emptyBodyRequest = self._helpers.addParameter(
-                emptyBodyRequest, urlParameter
-            )
-
-        return emptyBodyRequest
-
-    def scanRequest(
-        self, messageInfo
-    ):
-        # type: (IHttpRequestResponse) -> None
-        """
-        Invoked on every intercepted HTTP request. If it is a POST request,
-        tries to request it again using GET.
-        """
-        requestInfo = self.parser.parseRequestMessageInfo(messageInfo)
-
-        contentType = self.parser.parseContentType(requestInfo.headers)
-        if not contentType:  # content-type might be undefined
-            return
-
-        if contentType == "application/json":
-            for char in ["{", "}", "[", "]"]:
-                if (
-                    requestInfo.body.count(char) > 1
-                ):  # arrays/objects inside json can't be converted to GET
-                    return
-
-        if requestInfo.method == "POST":
-            if contentType == "application/json":
-                newRequest = self.createRequestFromPost(
-                    requestInfo
-                )  # createRequestFromPost doesn't support formdata
-            else:
-                newRequest = self._helpers.toggleRequestMethod(
-                    messageInfo.getRequest()
-                )  # toggleRequestMethod doesn't support json
-            if not newRequest:
-                return  # ensure that the request is possible
-            modifiedRequestResponse = self._callbacks.makeHttpRequest(
-                messageInfo.getHttpService(), newRequest
+            modifiedMessageInfo = self._callbacks.makeHttpRequest(
+                originalMessageInfo.getHttpService(), request
             )
             parsedModifiedResponse = self.parser.parseResponseMessageInfo(
-                modifiedRequestResponse
+                modifiedMessageInfo
             )
-            if (
-                parsedModifiedResponse.status >= 200
-                and parsedModifiedResponse.status < 300
-            ):
-                self.newIssueHook(
-                    url=parsedModifiedResponse.url,
-                    originalMessageInfo=messageInfo,
-                    modifiedMessageInfo=modifiedRequestResponse,
-                    paramName="x",
-                )
+            self.newIssueHook(
+                url=parsedModifiedResponse.url,
+                originalMessageInfo=messageInfo,
+                modifiedMessageInfo=modifiedMessageInfo,
+                paramName="undefined",
+            )
+
+    def scanRequest(self, messageInfo):
+        # type: (IHttpRequestResponse) -> None
+        """
+        Invoked on every request sent from the context menu. Iterates through valid
+        parameters, one by one, changes their value to an XSS payload, sends a request,
+        waits for script execution and creates an issue if the payload is executed
+        """
+        requestParsedInfo = self.parser.parseRequestMessageInfo(messageInfo)
+
+        xssRequests = self.generateXssRequests(
+            request=messageInfo.getRequest(), requestInfo=requestParsedInfo
+        )
+        webdriver = getWebdriver()
+
+        for xssRequest in xssRequests:
+            self.probeXss(
+                originalMessageInfo=messageInfo, request=xssRequest, webdriver=webdriver
+            )
+
+        webdriver.quit()
