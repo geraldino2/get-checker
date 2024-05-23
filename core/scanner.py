@@ -12,7 +12,7 @@ from java.util import ArrayList
 from parser import Parser
 
 
-class Fuzzer:
+class Scanner:
     def __init__(self, helpers, callbacks, issueHook):
         # type: (IExtensionHelpers, IBurpExtenderCallbacks, function) -> None
         """Defines internal config"""
@@ -54,18 +54,18 @@ class Fuzzer:
 
         return emptyBodyRequest
 
-    def fuzzRequestMethod(
-        self, messageInfo, toolFlag=IBurpExtenderCallbacks.TOOL_PROXY
+    def scanRequest(
+        self, messageInfo
     ):
-        # type: (IHttpRequestResponse, int) -> None
+        # type: (IHttpRequestResponse) -> None
         """
         Invoked on every intercepted HTTP request. If it is a POST request,
         tries to request it again using GET.
         """
-        requestInfo = self.parser.parseRequestMessageInfo(messageInfo, toolFlag)
+        requestInfo = self.parser.parseRequestMessageInfo(messageInfo)
 
         contentType = self.parser.parseContentType(requestInfo.headers)
-        if not contentType:  # content type might be undefined
+        if not contentType:  # content-type might be undefined
             return
 
         if contentType == "application/json":
@@ -100,5 +100,5 @@ class Fuzzer:
                     url=parsedModifiedResponse.url,
                     originalMessageInfo=messageInfo,
                     modifiedMessageInfo=modifiedRequestResponse,
-                    toolFlag=toolFlag,
+                    paramName="x",
                 )

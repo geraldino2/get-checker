@@ -1,31 +1,30 @@
 from burp import IBurpExtender
-from burp import IHttpListener
-from burp import IProxyListener
 from burp import IExtensionStateListener
 from burp import IMessageEditorController
 from burp import ITab
+from burp import IContextMenuFactory
 from java.io import PrintWriter
-from javax.swing import JScrollPane, JTabbedPane, JSplitPane
+from javax.swing import JScrollPane, JTabbedPane, JSplitPane, JMenuItem
 from java.util import ArrayList
+from thread import start_new_thread
 from threading import Lock
 from ui.table import Table, TableModel
-from core.fuzzer import Fuzzer
+from core.scanner import Scanner
 from ui.logentry import LogEntry
 
 
 class BurpExtender(
     IBurpExtender,
-    IHttpListener,
-    IProxyListener,
     IExtensionStateListener,
     ITab,
     IMessageEditorController,
+    IContextMenuFactory,
     TableModel,
 ):
     def __init__(self):
         # type: () -> None
         """Defines internal config"""
-        self.EXT_NAME = "GET Checker"
+        self.EXT_NAME = "XSS Detector"
         self._log = ArrayList()
         self._lock = Lock()
 
@@ -34,14 +33,13 @@ class BurpExtender(
         """Defines metadata used by Burp (extension name)"""
         self._callbacks.setExtensionName(self.EXT_NAME)
 
-    def registerListeners(self):
+    def callbacksRegister(self):
         # type: () -> None
         """
-        Registers itself as a listener for IHttpListener, IProxyListener,
-        IExtensionStateListener
+        Registers itself as a listener for IExtensionStateListener and as
+        IContextMenuFactory
         """
-        self._callbacks.registerHttpListener(self)
-        self._callbacks.registerProxyListener(self)
+        self._callbacks.registerContextMenuFactory(self)
         self._callbacks.registerExtensionStateListener(self)
 
     def registerExtenderCallbacks(self, callbacks):
@@ -57,25 +55,50 @@ class BurpExtender(
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
         self._stdout = PrintWriter(callbacks.getStdout(), True)
-        self.fuzzer = Fuzzer(
+        self.scanner = Scanner(
             callbacks=self._callbacks,
             helpers=self._helpers,
             issueHook=self.createLogEntry,
         )
-        self.registerListeners()
+        self.callbacksRegister()
 
         self.defineMetadata()
 
         self.defineUI()
 
+    def createMenuItems(self, invocation):
+        # type: (IContextMenuInvocation) -> List[JMenuItem]
+        """
+        Defined in IContextMenuFactory, defines the UI menu items on request right
+        click and the actions to be performed when clicked
+        """
+        menu_list = ArrayList()
+        menu_item = JMenuItem(
+            "Send to XSS Detector",
+            actionPerformed=lambda x: self.sendInvocationToScanner(invocation),
+        )
+        menu_list.add(menu_item)
+        return menu_list
+
+    def sendInvocationToScanner(self, invocation):
+        # type: (IContextMenuInvocation) -> None
+        """
+        Receives requests from the context menu and sends them to the scanner in a new
+        thread
+        """
+        selectedMessages = invocation.getSelectedMessages()
+
+        for messageInfo in selectedMessages:
+            start_new_thread(self.scanner.scanRequest, (messageInfo,))
+
     def createLogEntry(
-        self, url, originalMessageInfo, modifiedMessageInfo, toolFlag, method="GET"
+        self, url, originalMessageInfo, modifiedMessageInfo, paramName, method="GET"
     ):
-        # type: (str, IHttpRequestResponse, IHttpRequestResponse, int, str) -> None
+        # type: (str, IHttpRequestResponse, IHttpRequestResponse, str, str) -> None
         """Creates a log entry in the UI"""
         with self._lock:
             logEntry = LogEntry(
-                tool=toolFlag,
+                param=paramName,
                 requestResponse=self._callbacks.saveBuffersToTempFiles(
                     originalMessageInfo
                 ),
@@ -155,30 +178,6 @@ class BurpExtender(
         # type: () -> java.awt.Component
         """Defined in ITab. Defines the main UI component for the tab."""
         return self._main_panel
-
-    def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
-        # type: (int, boolean, IHttpRequestResponse) -> None
-        """
-        Defined in IHttpListener, invoked with HTTP traffic outside proxy.
-        Process traffic from general HTTP listener, parses the message and if
-        it is a request, fuzz the request method.
-        """
-        if messageIsRequest:
-            pass
-        else:
-            self.fuzzer.fuzzRequestMethod(messageInfo, toolFlag)
-
-    def processProxyMessage(self, messageIsRequest, message):
-        # type: (boolean, IInterceptedProxyMessage) -> None
-        """
-        Defined in IProxyListener, invoked with proxy traffic.
-        Process traffic from proxy, parses the message and if it is a request,
-        fuzz the request method.
-        """
-        if messageIsRequest:
-            pass
-        else:
-            self.fuzzer.fuzzRequestMethod(message.getMessageInfo())
 
     def extensionUnloaded(self):
         # type: () -> None

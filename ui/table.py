@@ -32,7 +32,7 @@ class Table(JTable):
 class TableModel(AbstractTableModel):
     def getRowCount(self):
         # type: () -> int
-        """Returns the row count of the Tool/URL table"""
+        """Returns the row count of the Param/URL table"""
         try:
             return self._log.size()
         except AttributeError:  # on initialization BurpExtender has no _log
@@ -40,24 +40,24 @@ class TableModel(AbstractTableModel):
 
     def getColumnCount(self):
         # type: () -> int
-        """Returns the magic value `2`: column count for tool/URL columns"""
+        """Returns the magic value `2`: column count for param/URL columns"""
         return 2
 
     def getColumnName(self, columnIndex):
         # type: (int) -> str
         """Returns the column name based on the selected index"""
         if columnIndex == 0:
-            return "Tool"
+            return "Parameter"
         if columnIndex == 1:
             return "URL"
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
         # type: (int, int) -> str
-        """Returns the table cell value based on row/column indexes: tool or URL"""
+        """Returns the table cell value based on row/column indexes: param or URL"""
         logEntry = self._log.get(rowIndex)
         if columnIndex == 0:
-            return self._callbacks.getToolName(logEntry._tool)
+            return logEntry._param
         if columnIndex == 1:
             return logEntry._url
         return ""
